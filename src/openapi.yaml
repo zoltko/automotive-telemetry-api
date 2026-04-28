@@ -1,0 +1,757 @@
+openapi: 3.0.3
+info:
+  title: Automotive Telemetry API
+  description: |
+    Backend system for collecting, storing, and analyzing real-time vehicle telemetry data.
+    Supports vehicle registration, sensor data uploads, and automatic alert generation.
+
+    ## Roles
+    - **manager** – full access to all resources and vehicles
+    - **driver** – access limited to their own vehicles; can only update `resolved` on alerts
+
+    ## Authentication
+    Login with `/api/auth/login`, copy the returned JWT, and click **Authorize** above.
+  version: 1.0.0
+
+servers:
+  - url: /api
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:          { type: integer, example: 1 }
+        name:        { type: string,  example: Alice Driver }
+        email:       { type: string,  example: driver@telemetry.com }
+        role:        { type: string,  enum: [driver, manager] }
+        token:       { type: string,  example: "eyJhbGciOiJIUzI1NiJ9..." }
+
+    LoginResponse:
+      type: object
+      properties:
+        token: { type: string }
+        user:
+          type: object
+          properties:
+            id:   { type: integer }
+            name: { type: string }
+            role: { type: string }
+
+    Vehicle:
+      type: object
+      properties:
+        id:        { type: integer, example: 1 }
+        ownerId:   { type: integer, example: 2 }
+        make:      { type: string,  example: Subaru }
+        model:     { type: string,  example: WRX STI }
+        year:      { type: integer, example: 2022 }
+        vin:       { type: string,  example: JF1VA2U61N9800001 }
+        createdAt: { type: string,  format: date-time }
+
+    SensorReading:
+      type: object
+      properties:
+        id:             { type: integer, example: 1 }
+        vehicleId:      { type: integer, example: 1 }
+        rpm:            { type: integer, example: 3400 }
+        oilTemp:        { type: number,  example: 198.0 }
+        coolantTemp:    { type: number,  example: 88.0 }
+        boostPressure:  { type: number,  example: 12.0 }
+        batteryVoltage: { type: number,  example: 14.2 }
+        recordedAt:     { type: string,  format: date-time }
+
+    Alert:
+      type: object
+      properties:
+        id:        { type: integer, example: 1 }
+        vehicleId: { type: integer, example: 1 }
+        readingId: { type: integer, nullable: true, example: 2 }
+        alertType: { type: string,  example: HIGH_OIL_TEMP }
+        severity:  { type: string,  enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+        message:   { type: string,  example: "Oil temperature exceeded 240 degrees C" }
+        resolved:  { type: boolean, example: false }
+        createdAt: { type: string,  format: date-time }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: "Descriptive error message" }
+
+paths:
+  # ── AUTH ────────────────────────────────────────────────────────────
+  /auth/signup:
+    post:
+      tags: [Authentication]
+      summary: Create a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email:    { type: string, example: newuser@example.com }
+                password: { type: string, example: Password123! }
+                name:     { type: string, example: John Smith }
+                role:     { type: string, enum: [driver, manager], example: driver }
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: "Email and password are required" }
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: "An account with this email already exists" }
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login and receive a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:    { type: string, example: driver@telemetry.com }
+                password: { type: string, example: Driver123! }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400':
+          description: Missing fields
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Incorrect password
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Email not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── VEHICLES ─────────────────────────────────────────────────────────
+  /vehicles:
+    post:
+      tags: [Vehicles]
+      summary: Register a new vehicle
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [make, model, year, vin]
+              properties:
+                make:  { type: string,  example: Subaru }
+                model: { type: string,  example: WRX STI }
+                year:  { type: integer, example: 2022 }
+                vin:   { type: string,  example: JF1VA2U61N9800142 }
+      responses:
+        '201':
+          description: Vehicle created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vehicle' }
+        '400':
+          description: Missing or invalid fields
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: VIN already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    get:
+      tags: [Vehicles]
+      summary: List vehicles (managers see all; drivers see only their own)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: List of vehicles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Vehicle' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /vehicles/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+        description: Vehicle ID
+
+    get:
+      tags: [Vehicles]
+      summary: Get a single vehicle by ID
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Vehicle found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vehicle' }
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Vehicle not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    put:
+      tags: [Vehicles]
+      summary: Update vehicle details (make, model, year only)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                make:  { type: string,  example: Subaru }
+                model: { type: string,  example: WRX STI }
+                year:  { type: integer, example: 2023 }
+      responses:
+        '200':
+          description: Vehicle updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vehicle' }
+        '400':
+          description: Invalid fields
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Vehicle not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      tags: [Vehicles]
+      summary: Delete a vehicle (cascades to readings and alerts)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Vehicle deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:      { type: integer }
+                  make:    { type: string }
+                  model:   { type: string }
+                  deleted: { type: boolean, example: true }
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Vehicle not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── SENSOR READINGS ───────────────────────────────────────────────────
+  /vehicles/{vehicleId}/sensor-readings:
+    parameters:
+      - name: vehicleId
+        in: path
+        required: true
+        schema: { type: integer }
+        description: Vehicle ID
+
+    post:
+      tags: [Sensor Readings]
+      summary: Upload a sensor reading (auto-generates alerts on threshold breach)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rpm, oilTemp, coolantTemp, boostPressure, batteryVoltage]
+              properties:
+                rpm:            { type: integer, example: 3400 }
+                oilTemp:        { type: number,  example: 198.0 }
+                coolantTemp:    { type: number,  example: 88.0 }
+                boostPressure:  { type: number,  example: 12.0 }
+                batteryVoltage: { type: number,  example: 14.2 }
+      responses:
+        '201':
+          description: Reading created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/SensorReading' }
+                  - type: object
+                    properties:
+                      warnings:
+                        type: array
+                        items: { type: string }
+                        example: ["Oil temperature exceeded 240 degrees C"]
+        '400':
+          description: Missing fields or invalid values
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Vehicle not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    get:
+      tags: [Sensor Readings]
+      summary: Get all sensor readings for a vehicle (newest first)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer }
+          description: Max number of readings to return
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+          description: Return only readings after this timestamp
+      responses:
+        '200':
+          description: List of readings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SensorReading' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Vehicle not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /vehicles/{vehicleId}/sensor-readings/{id}:
+    parameters:
+      - name: vehicleId
+        in: path
+        required: true
+        schema: { type: integer }
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+        description: Sensor reading ID
+
+    get:
+      tags: [Sensor Readings]
+      summary: Get a single sensor reading by ID
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Reading found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SensorReading' }
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Reading not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    put:
+      tags: [Sensor Readings]
+      summary: Correct or amend a sensor reading
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rpm:            { type: integer, example: 3500 }
+                oilTemp:        { type: number,  example: 200.0 }
+                coolantTemp:    { type: number,  example: 90.0 }
+                boostPressure:  { type: number,  example: 13.0 }
+                batteryVoltage: { type: number,  example: 14.0 }
+      responses:
+        '200':
+          description: Reading updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SensorReading' }
+        '400':
+          description: Invalid values
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Reading not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      tags: [Sensor Readings]
+      summary: Delete a sensor reading (unlinks related alerts)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Reading deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:        { type: integer }
+                  vehicleId: { type: integer }
+                  deleted:   { type: boolean, example: true }
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Reading not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ── ALERTS ────────────────────────────────────────────────────────────
+  /vehicles/{vehicleId}/alerts:
+    parameters:
+      - name: vehicleId
+        in: path
+        required: true
+        schema: { type: integer }
+
+    post:
+      tags: [Alerts]
+      summary: Manually create an alert for a vehicle
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [alertType, severity, message]
+              properties:
+                alertType:  { type: string, example: MAINTENANCE }
+                severity:   { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL], example: LOW }
+                message:    { type: string, example: "Oil change due in 500 km" }
+                readingId:  { type: integer, nullable: true, example: null }
+      responses:
+        '201':
+          description: Alert created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alert' }
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Vehicle not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    get:
+      tags: [Alerts]
+      summary: Get all alerts for a vehicle
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: resolved
+          in: query
+          schema: { type: boolean }
+          description: Filter by resolved status (true or false)
+      responses:
+        '200':
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Alert' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Vehicle not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /vehicles/{vehicleId}/alerts/{id}:
+    parameters:
+      - name: vehicleId
+        in: path
+        required: true
+        schema: { type: integer }
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+
+    get:
+      tags: [Alerts]
+      summary: Get a single alert by ID
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Alert found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alert' }
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Alert not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    put:
+      tags: [Alerts]
+      summary: Update an alert (owners can only set resolved; managers can edit any field)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolved:  { type: boolean, example: true }
+                severity:  { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+                message:   { type: string }
+                alertType: { type: string }
+      responses:
+        '200':
+          description: Alert updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alert' }
+        '400':
+          description: Invalid field values
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Not the owner or a manager
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Alert not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    delete:
+      tags: [Alerts]
+      summary: Delete an alert (manager only)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Alert deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:        { type: integer }
+                  vehicleId: { type: integer }
+                  deleted:   { type: boolean, example: true }
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid JWT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Manager role required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Alert not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }

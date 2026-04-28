@@ -1,0 +1,35 @@
+{
+  "name": "automotive-telemetry-api",
+  "version": "1.0.0",
+  "description": "Automotive Telemetry REST API - ITIS 4166 Final Project",
+  "license": "ISC",
+  "author": "Kasper Dziedzic",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --env-file=.env --watch src/server.js",
+    "start": "node src/server.js",
+    "build": "prisma generate",
+    "seed": "node --env-file=.env prisma/seed.js",
+    "deploy": "prisma migrate deploy && node prisma/seed.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.0.0",
+    "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
+    "js-yaml": "^4.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^6.0.0",
+    "swagger-ui-express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.29.0",
+    "eslint": "^9.29.0",
+    "eslint-config-prettier": "^10.1.5",
+    "globals": "^16.2.0",
+    "prettier": "^3.6.1"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  }
+}

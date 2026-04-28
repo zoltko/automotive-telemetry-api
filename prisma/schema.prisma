@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String
+  role         String    @default("driver") // "driver" | "manager"
+  createdAt    DateTime  @default(now()) @map("created_at")
+  vehicles     Vehicle[]
+
+  @@map("users")
+}
+
+model Vehicle {
+  id             Int              @id @default(autoincrement())
+  ownerId        Int              @map("owner_id")
+  make           String
+  model          String
+  year           Int
+  vin            String           @unique
+  createdAt      DateTime         @default(now()) @map("created_at")
+  owner          User             @relation(fields: [ownerId], references: [id])
+  sensorReadings SensorReading[]
+  alerts         Alert[]
+
+  @@map("vehicles")
+}
+
+model SensorReading {
+  id             Int      @id @default(autoincrement())
+  vehicleId      Int      @map("vehicle_id")
+  rpm            Int
+  oilTemp        Float    @map("oil_temp")
+  coolantTemp    Float    @map("coolant_temp")
+  boostPressure  Float    @map("boost_pressure")
+  batteryVoltage Float    @map("battery_voltage")
+  recordedAt     DateTime @default(now()) @map("recorded_at")
+  vehicle        Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  alerts         Alert[]
+
+  @@map("sensor_readings")
+}
+
+model Alert {
+  id          Int            @id @default(autoincrement())
+  vehicleId   Int            @map("vehicle_id")
+  readingId   Int?           @map("reading_id")
+  alertType   String         @map("alert_type")
+  severity    String         // "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+  message     String
+  resolved    Boolean        @default(false)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  vehicle     Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  reading     SensorReading? @relation(fields: [readingId], references: [id], onDelete: SetNull)
+
+  @@map("alerts")
+}
